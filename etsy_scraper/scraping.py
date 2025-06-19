@@ -1,5 +1,5 @@
 # etsy_scraper/scraping.py
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 import random
 import time
 import os
