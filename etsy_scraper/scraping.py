@@ -154,13 +154,14 @@ def process_url(
         username, last_post, priority, followers = '', '', 'LOW', 0
         if ig_url and INSTAGRAM_ENABLED:
             logger.debug(f"Found Instagram URL: {ig_url}")
+            username = ig_url.split('instagram.com/')[-1].split('/')[0]
             username, last_post, priority, followers = analyze_instagram_profile({
-                'username': ig_url.split('instagram.com/')[-1].split('/')[0],
+                'username': username,
                 'followers': 0
             })
         write_csv_row([
             url, ig_url, social.get('facebook', ''), social.get('tiktok', ''),
-            social.get('pinterest', ''), social.get('https', ''),  # Fix: Changed 'linktree' to 'https' (likely typo)
+            social.get('pinterest', ''), social.get('https', ''),
             social.get('youtube', ''), social.get('twitch', ''),
             social.get('twitter', ''), username, last_post, priority, followers, ''
         ])
