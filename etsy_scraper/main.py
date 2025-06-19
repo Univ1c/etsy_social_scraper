@@ -216,7 +216,7 @@ def process_urls_concurrently(
     )
     timer_thread.start()
 
-    with AVG_LOCK:
+    with AVG_LOCK["avg"]:
         WORKER_STATS.clear()
         TOTAL_PROCESSED = 0
         TOTAL_PROCESSING_TIME = 0.0
