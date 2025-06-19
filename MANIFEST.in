@@ -1,0 +1,6 @@
+include README.md
+include version.txt
+include requirements.txt
+include requirements.in
+recursive-include docs *.md
+recursive-include etsy_scraper_data *.json
