@@ -476,7 +476,7 @@ def display_queue_status() -> None:
 
 def worker_health_check():
     while True:
-        with AVG_LOCK:
+        with AVG_LOCK["avg"]:
             now = time.time()
             inactive_workers = [
                 wid for wid, stats in WORKER_STATS.items()

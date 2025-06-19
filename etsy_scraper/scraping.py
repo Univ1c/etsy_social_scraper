@@ -192,7 +192,7 @@ def process_url(
     logger = logging.getLogger(__name__)
 
     # Initialize worker stats
-    with AVG_LOCK:
+    with AVG_LOCK["avg"]:
         if worker_id not in WORKER_STATS:
             WORKER_STATS[worker_id] = {
                 'last_time': time.time(),
@@ -288,7 +288,7 @@ def process_url(
 
     finally:
         processing_time = time.time() - url_start_time
-        with AVG_LOCK:
+        with AVG_LOCK["avg"]:
             if processing_time > 0:
                 stats = WORKER_STATS[worker_id]
                 stats['avg_time'] = (stats['avg_time'] * stats['count'] + processing_time) / (stats['count'] + 1)
@@ -324,7 +324,7 @@ def format_time(seconds: float) -> str:
 def live_timer_thread(start_time: float, total_urls: int, stop_event: Event = None) -> None:
     """Continuously updates a live timer and stats line until stopped."""
     while not stop_event or not stop_event.is_set():
-        with AVG_LOCK:
+        with AVG_LOCK["avg"]:
             now = time.time()
             elapsed = now - start_time
             processed = TOTAL_PROCESSED
