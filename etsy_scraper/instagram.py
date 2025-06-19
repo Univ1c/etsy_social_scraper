@@ -27,10 +27,10 @@ from rate_limiter import INSTAGRAM_RATE_LIMITER
 from screen_manager import SCREEN
 
 # Constants
-MIN_DELAY_BETWEEN_ACTIONS = 10  # Minimum seconds between actions
-MAX_DELAY_BETWEEN_ACTIONS = 30  # Maximum seconds between actions
-MAX_LIKES_PER_PROFILE = 2       # Conservative default
-REQUEST_TIMEOUT = 45            # Seconds before API calls timeout
+MIN_DELAY_BETWEEN_ACTIONS = 10
+MAX_DELAY_BETWEEN_ACTIONS = 30
+MAX_LIKES_PER_PROFILE = 2
+REQUEST_TIMEOUT = 45
 
 # Global locks
 IG_ACTION_LOCK = threading.Lock()
@@ -61,9 +61,9 @@ class InstagramManager:
 
     def _setup_files(self):
         """Ensure required data files exist."""
-        self.session_file = BASE_DIR / "instagram_session.json"
-        self.action_log_file = BASE_DIR / "instagram_actions.csv"
-        self.followed_users_file = BASE_DIR / "followed_users.csv"
+        self.session_file = BASE_DIR / "user_files" / "instagram_session.json"
+        self.action_log_file = BASE_DIR / "user_files" / "instagram_actions.csv"
+        self.followed_users_file = BASE_DIR / "user_files" / "followed_users.csv"
         if not self.action_log_file.exists():
             with open(self.action_log_file, 'w') as f:
                 f.write("timestamp,action_type,username,success\n")
@@ -176,9 +176,9 @@ class InstagramClient:
             except Exception as e:
                 SCREEN.print_content(f"Challenge failed: {type(e).__name__}")
                 return False
-            except Exception as e:
-                SCREEN.print_content(f"Login failed: {type(e).__name__}")
-                return False
+        except Exception as e:
+            SCREEN.print_content(f"Login failed: {type(e).__name__}")
+            return False
 
     def safe_request(self, action_type: str, func, *args, **kwargs) -> Any:
         if action_type == 'follow' and self.action_counts['follow'] >= INSTAGRAM_MAX_DAILY_FOLLOWS:
@@ -210,11 +210,9 @@ class InstagramClient:
             SCREEN.print_content(f"API request failed: {type(e).__name__}")
             raise
 
-# Initialize the manager
 IG_MANAGER = InstagramManager()
 
 def extract_etsy_username(url: str) -> Optional[str]:
-    """Extract normalized Etsy shop username from URL."""
     try:
         parsed = urlparse(url)
         path = parsed.path.strip('/').lower()
@@ -225,7 +223,6 @@ def extract_etsy_username(url: str) -> Optional[str]:
         return None
 
 def generate_etsy_url_variants(etsy_url: str, username: str) -> Set[str]:
-    """Generate all possible Etsy URL references for matching."""
     base_url = etsy_url.split('?')[0].rstrip('/')
     return {
         base_url,
@@ -268,17 +265,13 @@ def analyze_instagram_profile(user_info: Dict[str, Any]) -> Tuple[str, str, str,
     return username, last_post, priority, followers
 
 def engage_with_profile(username: str) -> bool:
-    """Follow and like posts with comprehensive safety checks."""
     if DRY_RUN:
         SCREEN.print_content(f"DRY RUN: Would engage with @{username}")
         return True
-    
     if not IG_MANAGER.can_perform_actions():
         SCREEN.print_content("Insufficient time between sessions - skipping")
         return False
-    
     try:
-        # Follow
         user_id = IG_MANAGER.client.safe_request(
             'follow',
             IG_MANAGER.client.cl.user_id_from_username,
@@ -290,8 +283,6 @@ def engage_with_profile(username: str) -> bool:
             user_id
         )
         IG_MANAGER.record_action('follow', username, True)
-        
-        # Like posts (conservative)
         like_count = min(MAX_LIKES_PER_PROFILE, random.randint(1, 2))
         posts = IG_MANAGER.client.safe_request(
             'posts',
@@ -299,7 +290,6 @@ def engage_with_profile(username: str) -> bool:
             user_id,
             amount=like_count
         )
-        
         for post in posts:
             try:
                 IG_MANAGER.client.safe_request(
@@ -308,103 +298,74 @@ def engage_with_profile(username: str) -> bool:
                     post.id
                 )
                 IG_MANAGER.record_action('like', username, True)
-                time.sleep(random.uniform(8, 15))  # Conservative spacing
+                time.sleep(random.uniform(8, 15))
             except Exception as e:
                 IG_MANAGER.record_action('like', username, False)
-        
         return True
-        
     except Exception as e:
         IG_MANAGER.record_action('follow', username, False)
         SCREEN.print_content(f"Engagement failed with @{username}: {type(e).__name__}")
         return False
 
 def process_etsy_shop(etsy_url: str) -> Tuple[str, str, str, int]:
-    """
-    Main workflow:
-    1. Find matching Instagram profiles
-    2. Analyze and engage with relevant ones
-    3. Return engagement results
-    """
     if not INSTAGRAM_ENABLED or not IG_MANAGER.client:
         return '', '', 'LOW', 0
-    
-    # Extract Etsy username and generate URL variants
     etsy_username = extract_etsy_username(etsy_url)
     if not etsy_username:
         SCREEN.print_content(f"Invalid Etsy URL: {etsy_url}")
         return '', '', 'LOW', 0
-    
     url_variants = generate_etsy_url_variants(etsy_url, etsy_username)
-    
-    # Search for matching Instagram profiles
     try:
         candidates = IG_MANAGER.client.safe_request(
             'search',
             IG_MANAGER.client.cl.search_users,
             etsy_username
-        )[:15]  # Limit candidates
-        
+        )[:15]
         if not candidates:
             SCREEN.print_content("No matching profiles found")
             return '', '', 'LOW', 0
-            
-        # Process candidates with thread pool (limited concurrency)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             futures = {}
             for user in candidates:
                 if user.is_private:
-                    continue  # Skip private accounts
-                    
+                    continue
                 futures[executor.submit(
                     _process_candidate,
                     user.username,
                     url_variants
                 )] = user.username
-            
-            # Wait for first successful match or timeout
             done, _ = concurrent.futures.wait(
                 futures,
                 timeout=120,
                 return_when=concurrent.futures.FIRST_COMPLETED
             )
-            
             for future in done:
                 result = future.result()
                 if result:
                     executor.shutdown(cancel_futures=True)
                     return result
-                    
         SCREEN.print_content("No qualifying profiles found")
         return '', '', 'LOW', 0
-        
     except Exception as e:
         SCREEN.print_content(f"Shop processing failed: {type(e).__name__}")
         traceback.print_exc()
         return '', '', 'LOW', 0
 
 def _process_candidate(username: str, etsy_urls: Set[str]) -> Optional[Tuple[str, str, str, int]]:
-    """Process a single candidate profile (thread-safe)."""
     try:
-        # Get full profile info
         profile = IG_MANAGER.client.safe_request(
             'profile',
             IG_MANAGER.client.cl.user_info_by_username,
             username
         )
-        
-        # Check for Etsy links
         bio = (profile.biography or '').lower()
         external = (profile.external_url or '').lower()
         has_link = any(url in text for url in etsy_urls for text in [bio, external])
-        
         if has_link:
             analysis = analyze_instagram_profile({
                 'username': profile.username,
                 'followers': profile.follower_count
             })
-            
-            # Only engage with HIGH/MEDIUM priority
             if analysis[2] in ['HIGH', 'MEDIUM']:
                 if engage_with_profile(profile.username):
                     if analysis[2] == 'HIGH':
@@ -413,8 +374,6 @@ def _process_candidate(username: str, etsy_urls: Set[str]) -> Optional[Tuple[str
                             f"(Followers: {profile.follower_count})"
                         )
                     return analysis
-                    
     except Exception as e:
         SCREEN.print_content(f"Candidate processing failed: {type(e).__name__}")
-    
     return None
