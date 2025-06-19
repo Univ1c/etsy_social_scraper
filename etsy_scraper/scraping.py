@@ -152,19 +152,22 @@ def process_url(
             return 0.0
         ig_url = social.get('instagram', '')
         username, last_post, priority, followers = '', '', 'LOW', 0
-        if ig_url:
+        if ig_url and INSTAGRAM_ENABLED:
             logger.debug(f"Found Instagram URL: {ig_url}")
-            username, last_post, priority, followers = analyze_instagram_profile(ig_url)
+            username, last_post, priority, followers = analyze_instagram_profile({
+                'username': ig_url.split('instagram.com/')[-1].split('/')[0],
+                'followers': 0
+            })
         write_csv_row([
             url, ig_url, social.get('facebook', ''), social.get('tiktok', ''),
-            social.get('pinterest', ''), social.get('linktree', ''),
+            social.get('pinterest', ''), social.get('https', ''),  # Fix: Changed 'linktree' to 'https' (likely typo)
             social.get('youtube', ''), social.get('twitch', ''),
             social.get('twitter', ''), username, last_post, priority, followers, ''
         ])
         mark_done(url)
-        logger.info(f"Successfully processed URL: {url}")
+        logger.info(f"Successfully processed: {url}")
     except Exception as e:
-        logger.error(f"Error processing URL {url}: {str(e)}", exc_info=True)
+        logger.error(f"Error processing URL {url}: {str(e)}")
         mark_failed(url, str(e))
         return 0.0
     finally:

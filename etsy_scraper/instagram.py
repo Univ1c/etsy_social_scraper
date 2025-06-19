@@ -54,9 +54,11 @@ class InstagramManager:
         self.follow_count = 0
         self.like_count = 0
         self._setup_files()
-        
-        if INSTAGRAM_ENABLED:
-            self._init_client()
+    # Skip client initialization if Instagram is disabled
+    if INSTAGRAM_ENABLED:
+        self._init_client()
+    else:
+        SCREEN.print_content("Instagram disabled, skipping client initialization")
     
     def _setup_files(self):
         """Ensure required data files exist."""
@@ -282,10 +284,8 @@ def analyze_instagram_profile(user_info: Dict[str, Any]) -> Tuple[str, str, str,
     followers = user_info.get('followers', 0)
     last_post = ''
     priority = 'LOW'
-    
-    if not username or not IG_MANAGER.client:
+    if not INSTAGRAM_ENABLED or not IG_MANAGER.client:
         return username, last_post, priority, followers
-    
     try:
         user_id = IG_MANAGER.client.safe_request(
             'user_id',
@@ -298,20 +298,16 @@ def analyze_instagram_profile(user_info: Dict[str, Any]) -> Tuple[str, str, str,
             user_id,
             amount=1
         )
-        
         if posts:
             post_time = posts[0].taken_at
             last_post = post_time.isoformat()
             hours_since = (datetime.now(post_time.tzinfo) - post_time).total_seconds() / 3600
-            
             if hours_since < 24:
                 priority = 'HIGH'
             elif hours_since < 72:
                 priority = 'MEDIUM'
-                
     except Exception as e:
         SCREEN.print_content(f"Profile analysis failed for @{username}: {type(e).__name__}")
-    
     return username, last_post, priority, followers
 
 def engage_with_profile(username: str) -> bool:
