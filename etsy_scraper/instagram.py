@@ -38,15 +38,15 @@ IG_SESSION_LOCK = threading.Lock()
 
 class InstagramManager:
     """Centralized Instagram operations with safety controls."""
-    
+
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialize()
         return cls._instance
-    
+
     def _initialize(self):
         """Initialize the Instagram client and state tracking."""
         self.client = None
@@ -54,61 +54,49 @@ class InstagramManager:
         self.follow_count = 0
         self.like_count = 0
         self._setup_files()
-    # Skip client initialization if Instagram is disabled
-    if INSTAGRAM_ENABLED:
-        self._init_client()
-    else:
-        SCREEN.print_content("Instagram disabled, skipping client initialization")
-    
+        if INSTAGRAM_ENABLED:
+            self._init_client()
+        else:
+            SCREEN.print_content("Instagram disabled, skipping client initialization")
+
     def _setup_files(self):
         """Ensure required data files exist."""
         self.session_file = BASE_DIR / "instagram_session.json"
         self.action_log_file = BASE_DIR / "instagram_actions.csv"
         self.followed_users_file = BASE_DIR / "followed_users.csv"
-        
-        # Create action log if missing
         if not self.action_log_file.exists():
             with open(self.action_log_file, 'w') as f:
                 f.write("timestamp,action_type,username,success\n")
-                
-        # Create followed users file if missing
         if not self.followed_users_file.exists():
             with open(self.followed_users_file, 'w') as f:
                 f.write("timestamp,username,followed_back,last_checked\n")
-    
+
     def _init_client(self):
         """Initialize the Instagram client with safety controls."""
         try:
-            from instagrapi import Client
             self.client = InstagramClient(
                 session_file=self.session_file,
                 action_log_file=self.action_log_file,
                 followed_users_file=self.followed_users_file
             )
-            
             if not self.client.ensure_session():
                 raise RuntimeError("Failed to establish Instagram session")
-                
         except Exception as e:
             SCREEN.print_content(f"Instagram initialization failed: {e}")
             traceback.print_exc()
             self.client = None
 
     def can_perform_actions(self) -> bool:
-        """Check if we're allowed to perform actions based on timing."""
         if not self.last_session_start:
             return True
-            
         hours_since_last = (datetime.now() - self.last_session_start).total_seconds() / 3600
         return hours_since_last >= INSTAGRAM_MIN_SESSION_GAP_HOURS
-    
+
     def record_action(self, action_type: str, username: str, success: bool):
-        """Log an action attempt."""
         with open(self.action_log_file, 'a') as f:
             f.write(f"{datetime.now().isoformat()},{action_type},{username},{success}\n")
-    
+
     def get_recent_actions(self) -> List[Dict[str, str]]:
-        """Get recently performed actions."""
         try:
             with open(self.action_log_file, 'r') as f:
                 return list(csv.DictReader(f))
@@ -116,8 +104,6 @@ class InstagramManager:
             return []
 
 class InstagramClient:
-    """Thread-safe Instagram client with rate limiting and session management."""
-    
     def __init__(self, session_file: Path, action_log_file: Path, followed_users_file: Path):
         self.cl = Client()
         self.session_file = session_file
@@ -127,14 +113,11 @@ class InstagramClient:
         self.action_counts = {'follow': 0, 'like': 0}
         self.last_action_time = None
         self._load_action_counts()
-    
+
     def _configure_client(self):
-        """Apply conservative client settings."""
         self.cl.delay_range = [5, 10]
         self.cl.request_timeout = REQUEST_TIMEOUT
-        self.cl.max_retries = 1  # Fewer retries = less suspicious
-        
-        # Device simulation
+        self.cl.max_retries = 1
         self.cl.set_device({
             'app_version': '242.0.0.0.0',
             'android_version': 13,
@@ -146,11 +129,8 @@ class InstagramClient:
             'model': 'Pixel 7',
             'cpu': 'arm64-v8a'
         })
-        
-        
-    
+
     def _load_action_counts(self):
-        """Load daily action counts from file."""
         try:
             if self.action_log_file.exists():
                 with open(self.action_log_file, 'r') as f:
@@ -162,34 +142,27 @@ class InstagramClient:
                     }
         except Exception as e:
             SCREEN.print_content(f"Error loading action counts: {e}")
-    
+
     def ensure_session(self) -> bool:
-        """Ensure we have a valid session, with challenge handling."""
         with IG_SESSION_LOCK:
             if self.session_file.exists():
                 try:
                     self.cl.load_settings(self.session_file)
-                    # Validate session
                     self.cl.get_timeline_feed()
                     return True
                 except (ClientLoginRequired, ChallengeRequired) as e:
                     SCREEN.print_content(f"Session expired: {type(e).__name__}")
                 except Exception as e:
                     SCREEN.print_content(f"Session validation failed: {type(e).__name__}")
-            
             return self._establish_new_session()
-    
+
     def _establish_new_session(self) -> bool:
-        """Perform fresh login with challenge handling."""
         username = os.getenv("INSTAGRAM_USERNAME")
         password = os.getenv("INSTAGRAM_PASSWORD")
-        
         if not username or not password:
             SCREEN.print_content("Instagram credentials not configured")
             return False
-        
         try:
-            # Initial login attempt
             self.cl.login(username, password)
             self.cl.dump_settings(self.session_file)
             return True
@@ -203,31 +176,20 @@ class InstagramClient:
             except Exception as e:
                 SCREEN.print_content(f"Challenge failed: {type(e).__name__}")
                 return False
-        except Exception as e:
-            SCREEN.print_content(f"Login failed: {type(e).__name__}")
-            return False
-    
+            except Exception as e:
+                SCREEN.print_content(f"Login failed: {type(e).__name__}")
+                return False
+
     def safe_request(self, action_type: str, func, *args, **kwargs) -> Any:
-        """
-        Execute an Instagram API request with:
-        - Rate limiting
-        - Action counting
-        - Error handling
-        - Session recovery
-        """
-        # Check daily limits
         if action_type == 'follow' and self.action_counts['follow'] >= INSTAGRAM_MAX_DAILY_FOLLOWS:
             raise ClientThrottledError("Daily follow limit reached")
         elif action_type == 'like' and self.action_counts['like'] >= INSTAGRAM_MAX_LIKES:
             raise ClientThrottledError("Daily like limit reached")
-        
-        # Enforce delay between actions
         if self.last_action_time:
             elapsed = (datetime.now() - self.last_action_time).total_seconds()
             required_delay = random.uniform(MIN_DELAY_BETWEEN_ACTIONS, MAX_DELAY_BETWEEN_ACTIONS)
             if elapsed < required_delay:
                 time.sleep(required_delay - elapsed)
-        
         try:
             with IG_ACTION_LOCK:
                 INSTAGRAM_RATE_LIMITER.wait()
@@ -235,13 +197,12 @@ class InstagramClient:
                 self.action_counts[action_type] += 1
                 self.last_action_time = datetime.now()
                 return result
-                
         except (ClientLoginRequired, ChallengeRequired):
             if self.ensure_session():
                 return self.safe_request(action_type, func, *args, **kwargs)
             raise
         except ClientThrottledError:
-            wait = random.randint(300, 600)  # 5-10 minute backoff
+            wait = random.randint(300, 600)
             SCREEN.print_content(f"Rate limited - waiting {wait//60} minutes")
             time.sleep(wait)
             return self.safe_request(action_type, func, *args, **kwargs)
@@ -276,10 +237,6 @@ def generate_etsy_url_variants(etsy_url: str, username: str) -> Set[str]:
     }
 
 def analyze_instagram_profile(user_info: Dict[str, Any]) -> Tuple[str, str, str, int]:
-    """
-    Analyze Instagram profile with enhanced safety.
-    Returns: (username, last_post_time, priority, followers)
-    """
     username = user_info.get('username', '')
     followers = user_info.get('followers', 0)
     last_post = ''
