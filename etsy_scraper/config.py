@@ -111,7 +111,7 @@ SOCIAL_DOMAINS = {
 }
 
 # ========== THREADING / GLOBAL STATE ==========
-MAX_WORKERS = min(32, (os.cpu_count() or 1) + 4)
+MAX_WORKERS = 3
 
 AVG_LOCK = {
     "avg": threading.Lock(),
